@@ -1,0 +1,40 @@
+<!--
+Configurable launch file to recolor mono16 output from the FLIR camera.
+
+You can uncomment the viewer at bottom if you want to view the image stream.
+-->
+
+<launch>
+
+  <!-- Namespace to publish in -->
+    <arg name="rgb_red"          default="0" />
+    <arg name="rgb_green"          default="255" />
+    <arg name="rgb_blue"      default="0" />
+
+    <arg name="rect_image_vis"          default="/ueye/image_rect_color" />
+    <arg name="camera_info_vis"      default="/ueye/camera_info" />
+    <arg name="rect_image_therm"          default="/flir/image_color_rect" />
+    <arg name="camera_info_therm"      default="/flir/camera_info" />
+
+    <arg name="keep_outsiders"       default="true" />
+    <arg name="rect_image"          default="/flir/image_color_rect" />
+    <arg name="camera_info"      default="/flir/camera_info" />
+    <arg name="cloud"        default = "/velodyne_points"/>
+    <arg name="output_cloud"        default = "/velodyne_colored_flir"/>
+
+  <!-- The camera node -->
+  <node name="colorize_pointcloud" pkg="colorize_pointcloud" type="colorize_pointcloud" output="screen" respawn="true">
+    <param name="r" value="$(arg rgb_red)"  />
+    <param name="g" value="$(arg rgb_green)" />
+    <param name="b" value="$(arg rgb_blue)" />
+    <param name="keep_outsiders" type="bool" value="$(arg keep_outsiders)"/>
+    <param name="rect_image_vis" type="str" value="$(arg rect_image_vis)" />
+    <param name="camera_info_vis" type="str" value="$(arg camera_info_vis)" />
+    <param name="rect_image_therm" type="str" value="$(arg rect_image_therm)" />
+    <param name="camera_info_therm" type="str" value="$(arg camera_info_therm)" />
+    <param name="cloud" type="str" value="$(arg cloud)"/>
+    <param name="output_cloud" type="str" value="$(arg output_cloud)"/>
+  </node>
+
+
+</launch>
