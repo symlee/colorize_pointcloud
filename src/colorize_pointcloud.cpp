@@ -60,6 +60,7 @@ bool keep_outsiders = false;
 int color_r;
 int color_g;
 int color_b;
+int32_t color_rgb;
 
 image_geometry::PinholeCameraModel cam_model_vis_;
 image_geometry::PinholeCameraModel cam_model_therm_;
@@ -79,6 +80,16 @@ struct multModalCloud
       uint8_t r; 
     }; 
     float rgb;				
+  };
+  union 
+  { 
+    struct 
+    { 
+      uint8_t b_vis; 
+      uint8_t g_vis; 
+      uint8_t r_vis; 
+    }; 
+    float rgb_vis;				
   };
   union 
   { 
@@ -115,18 +126,27 @@ POINT_CLOUD_REGISTER_POINT_STRUCT (multModalCloud,        // here we assume a XY
 				   )
 
 void configCb(colorize_pointcloud::ColorizerConfig &newconfig, uint32_t level) {
+  bool color_changed = false;
   if (newconfig.keep_outsiders != keep_outsiders)
     keep_outsiders = newconfig.keep_outsiders;
-  if (newconfig.r != color_r)
+  if (newconfig.r != color_r) {
     color_r = newconfig.r;
-  if (newconfig.g != color_g)
+    color_changed = true;
+  }
+  if (newconfig.g != color_g) {
     color_g = newconfig.g;
-  if (newconfig.b != color_b)
+    color_changed = true;
+  }
+  if (newconfig.b != color_b) {
     color_b = newconfig.b;
+    color_changed = true;
+  }
+  if (color_changed)
+    color_rgb = (((uint8_t)color_r) << 16) | (((uint8_t)color_g) << 8) | ((uint8_t)color_b); 
 }
 
 
-void extractPointCloudColors(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud_therm, image_geometry::PinholeCameraModel cam_model_vis_, cv::Mat img_vis, image_geometry::PinholeCameraModel cam_model_therm_, cv::Mat img_therm, pcl::PointIndices fov_indices) {
+void colorPointCloud(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud_therm, image_geometry::PinholeCameraModel cam_model_vis_, cv::Mat img_vis, image_geometry::PinholeCameraModel cam_model_therm_, cv::Mat img_therm, pcl::PointIndices fov_indices) {
   // for VIS
   cv::Point2d uv;
   for(unsigned long i=0; i < pcl_cloud->size(); ++i){
@@ -153,23 +173,14 @@ void extractPointCloudColors(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl
       }
       //point is not in FOV of the camera
       else{
-	uint8_t r = (uint8_t)color_r;
-	uint8_t g = (uint8_t)color_g;
-	uint8_t b = (uint8_t)color_b;
-	int32_t rgb = (r << 16) | (g << 8) | b; 
-	pcl_cloud->points[i].rgb = *(float *)(&rgb);
+	pcl_cloud->points[i].rgb_vis = *(float *)(&color_rgb);
       }
     }
     //point is behind camera
     else{
-      uint8_t r = (uint8_t)color_r;
-      uint8_t g = (uint8_t)color_g;
-      uint8_t b = (uint8_t)color_b;
-      int32_t rgb = (r << 16) | (g << 8) | b; 
-      pcl_cloud->points[i].rgb = *(float *)(&rgb);
+       pcl_cloud->points[i].rgb_vis = *(float *)(&color_rgb);
     }
   
-
     // for THERM
     if(pcl_cloud_therm->points[i].z>0) {
       uv = cam_model_therm_.project3dToPixel(
@@ -182,30 +193,22 @@ void extractPointCloudColors(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl
   	  pcl_cloud->points[i].b_therm = img_therm.at<uchar>(cv::Point(uv.x,uv.y));
   	}
   	if (img_vis.channels() == 3) {
-  	  uint8_t r_therm = (uint8_t)img_therm.at<cv::Vec3b>(uv)[0];;
-  	  uint8_t g_therm = (uint8_t)img_therm.at<cv::Vec3b>(uv)[1];;
-  	  uint8_t b_therm = (uint8_t)img_therm.at<cv::Vec3b>(uv)[2];;
-  	  int32_t rgb_therm = (r_therm << 16) | (g_therm << 8) | b_therm; 
-  	  pcl_cloud->points[i].rgb_therm = *(float *)(&rgb_therm);
+  	  uint8_t r = (uint8_t)img_therm.at<cv::Vec3b>(uv)[0];;
+  	  uint8_t g = (uint8_t)img_therm.at<cv::Vec3b>(uv)[1];;
+  	  uint8_t b = (uint8_t)img_therm.at<cv::Vec3b>(uv)[2];;
+  	  int32_t rgb = (r << 16) | (g << 8) | b; 
+  	  pcl_cloud->points[i].rgb = *(float *)(&rgb);
   	}
   	fov_indices.indices.push_back(i);
       }
       //point is not in FOV of the camera
       else{
-  	uint8_t r_therm = (uint8_t)color_r;
-  	uint8_t g_therm = (uint8_t)color_g;
-  	uint8_t b_therm = (uint8_t)color_b;
-  	int32_t rgb_therm = (r_therm << 16) | (g_therm << 8) | b_therm; 
-  	pcl_cloud->points[i].rgb_therm = *(float *)(&rgb_therm);
+  	pcl_cloud->points[i].rgb = *(float *)(&color_rgb);
       }
     }
     //point is behind camera
     else{
-      uint8_t r_therm = (uint8_t)color_r;
-      uint8_t g_therm = (uint8_t)color_g;
-      uint8_t b_therm = (uint8_t)color_b;
-      int32_t rgb_therm = (r_therm << 16) | (g_therm << 8) | b_therm; 
-      pcl_cloud->points[i].rgb_therm = *(float *)(&rgb_therm);
+      pcl_cloud->points[i].rgb = *(float *)(&color_rgb);
     }
   }
 }
@@ -270,7 +273,7 @@ void callback(const sensor_msgs::ImageConstPtr &imgMsg_vis, const sensor_msgs::C
   pcl::PointIndices fov_indices;
 
 
-  extractPointCloudColors(pcl_cloud, pcl_cloud_therm, cam_model_vis_, img_vis, cam_model_therm_, img_therm, fov_indices);
+  colorPointCloud(pcl_cloud, pcl_cloud_therm, cam_model_vis_, img_vis, cam_model_therm_, img_therm, fov_indices);
   
     
   // transform colored PCL cloud to sensor_msgs cloud
@@ -332,6 +335,8 @@ int main(int argc, char **argv) {
   ros::param::get("~r", color_r);
   ros::param::get("~g", color_g);
   ros::param::get("~b", color_b);
+
+  color_rgb = (((uint8_t)color_r) << 16) | (((uint8_t)color_g) << 8) | ((uint8_t)color_b); 
 
 
   // TODO: add rad image message fiters later
