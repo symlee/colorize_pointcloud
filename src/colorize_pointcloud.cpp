@@ -126,64 +126,7 @@ void configCb(colorize_pointcloud::ColorizerConfig &newconfig, uint32_t level) {
 }
 
 
-// TODO: may need function signature to include more variables
-void callback(const sensor_msgs::ImageConstPtr &imgMsg_vis, const sensor_msgs::CameraInfoConstPtr &infoMsg_vis, const sensor_msgs::ImageConstPtr &imgMsg_therm, const sensor_msgs::CameraInfoConstPtr &infoMsg_therm, const sensor_msgs::PointCloud2ConstPtr &cloudMsg) {
-
-  // transfer sensor_msgs image ptr to OpenCV image ptr (TODO: make this another function that can be reused for ueye, flir, rad)  
-  cv_bridge::CvImagePtr cv_ptr_vis;
-  cv_bridge::CvImagePtr cv_ptr_therm;
-  try {
-    cv_ptr_vis = cv_bridge::toCvCopy(imgMsg_vis);
-    cv_ptr_therm = cv_bridge::toCvCopy(imgMsg_therm);
-  }
-  catch (cv_bridge::Exception &e) {
-    ROS_ERROR("cv_bridge exception: %s", e.what());
-    return;
-  }
-
-  
-  // extract image matrix from ptr
-  cv::Mat img_vis = cv_ptr_vis->image;
-  cv::Mat img_therm = cv_ptr_therm->image;  
-  // if no rgb frame for coloring:
-  if (img_vis.data == NULL || img_therm.data == NULL)
-    {
-      ROS_ERROR("No Color Information in Image");
-      return;
-    }
-
-  // create blank sensor_msgs pointclouds and transform to image frames  
-  sensor_msgs::PointCloud2 camCld_vis;
-  sensor_msgs::PointCloud2 camCld_therm;
-  try{
-    pcl_ros::transformPointCloud(imgMsg_vis->header.frame_id, *cloudMsg, camCld_vis, *listener) ;    
-    pcl_ros::transformPointCloud(imgMsg_therm->header.frame_id, *cloudMsg, camCld_therm, *listener) ;
-  }
-  catch (tf::TransformException ex){
-    ROS_ERROR("%s",ex.what());
-    ros::Duration(1.0).sleep();
-  }
-
-  // build camera models from camera info
-  cam_model_vis_.fromCameraInfo(infoMsg_vis); 
-  cam_model_therm_.fromCameraInfo(infoMsg_therm);
-
-
-  // create new PCL point clouds and grab metadata and data from trasnformed sensor_msgs
-  pcl::PCLPointCloud2* cld_vis = new pcl::PCLPointCloud2;
-  pcl::PCLPointCloud2* cld_therm = new pcl::PCLPointCloud2;
-  pcl_conversions::toPCL(camCld_vis,*cld_vis);
-  pcl_conversions::toPCL(camCld_therm,*cld_therm);
-
-  
-  // create clouds that will be colorized and grab data from trasformed PCL point clouds
-  pcl::PointCloud<multModalCloud>::Ptr pcl_cloud(new pcl::PointCloud<multModalCloud>);
-  pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud_therm(new pcl::PointCloud<pcl::PointXYZ>);  
-  pcl::fromPCLPointCloud2(*cld_vis,*pcl_cloud);
-  pcl::fromPCLPointCloud2(*cld_therm,*pcl_cloud_therm);
-
-  pcl::PointIndices fov_indices;
-
+void extractPointCloudColors(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud_therm, image_geometry::PinholeCameraModel cam_model_vis_, cv::Mat img_vis, image_geometry::PinholeCameraModel cam_model_therm_, cv::Mat img_therm, pcl::PointIndices fov_indices) {
   // for VIS
   cv::Point2d uv;
   for(unsigned long i=0; i < pcl_cloud->size(); ++i){
@@ -265,7 +208,69 @@ void callback(const sensor_msgs::ImageConstPtr &imgMsg_vis, const sensor_msgs::C
       pcl_cloud->points[i].rgb_therm = *(float *)(&rgb_therm);
     }
   }
+}
 
+
+// TODO: may need function signature to include more variables
+void callback(const sensor_msgs::ImageConstPtr &imgMsg_vis, const sensor_msgs::CameraInfoConstPtr &infoMsg_vis, const sensor_msgs::ImageConstPtr &imgMsg_therm, const sensor_msgs::CameraInfoConstPtr &infoMsg_therm, const sensor_msgs::PointCloud2ConstPtr &cloudMsg) {
+
+  // transfer sensor_msgs image ptr to OpenCV image ptr (TODO: make this another function that can be reused for ueye, flir, rad)  
+  cv_bridge::CvImagePtr cv_ptr_vis;
+  cv_bridge::CvImagePtr cv_ptr_therm;
+  try {
+    cv_ptr_vis = cv_bridge::toCvCopy(imgMsg_vis);
+    cv_ptr_therm = cv_bridge::toCvCopy(imgMsg_therm);
+  }
+  catch (cv_bridge::Exception &e) {
+    ROS_ERROR("cv_bridge exception: %s", e.what());
+    return;
+  }
+
+  
+  // extract image matrix from ptr
+  cv::Mat img_vis = cv_ptr_vis->image;
+  cv::Mat img_therm = cv_ptr_therm->image;  
+  // if no rgb frame for coloring:
+  if (img_vis.data == NULL || img_therm.data == NULL)
+    {
+      ROS_ERROR("No Color Information in Image");
+      return;
+    }
+
+  // create blank sensor_msgs pointclouds and transform to image frames  
+  sensor_msgs::PointCloud2 camCld_vis;
+  sensor_msgs::PointCloud2 camCld_therm;
+  try{
+    pcl_ros::transformPointCloud(imgMsg_vis->header.frame_id, *cloudMsg, camCld_vis, *listener) ;    
+    pcl_ros::transformPointCloud(imgMsg_therm->header.frame_id, *cloudMsg, camCld_therm, *listener) ;
+  }
+  catch (tf::TransformException ex){
+    ROS_ERROR("%s",ex.what());
+    ros::Duration(1.0).sleep();
+  }
+
+  // build camera models from camera info
+  cam_model_vis_.fromCameraInfo(infoMsg_vis); 
+  cam_model_therm_.fromCameraInfo(infoMsg_therm);
+
+
+  // create new PCL point clouds and grab metadata and data from trasnformed sensor_msgs
+  pcl::PCLPointCloud2* cld_vis = new pcl::PCLPointCloud2;
+  pcl::PCLPointCloud2* cld_therm = new pcl::PCLPointCloud2;
+  pcl_conversions::toPCL(camCld_vis,*cld_vis);
+  pcl_conversions::toPCL(camCld_therm,*cld_therm);
+
+  
+  // create clouds that will be colorized and grab data from trasformed PCL point clouds
+  pcl::PointCloud<multModalCloud>::Ptr pcl_cloud(new pcl::PointCloud<multModalCloud>);
+  pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud_therm(new pcl::PointCloud<pcl::PointXYZ>);  
+  pcl::fromPCLPointCloud2(*cld_vis,*pcl_cloud);
+  pcl::fromPCLPointCloud2(*cld_therm,*pcl_cloud_therm);
+
+  pcl::PointIndices fov_indices;
+
+
+  extractPointCloudColors(pcl_cloud, pcl_cloud_therm, cam_model_vis_, img_vis, cam_model_therm_, img_therm, fov_indices);
   
     
   // transform colored PCL cloud to sensor_msgs cloud
