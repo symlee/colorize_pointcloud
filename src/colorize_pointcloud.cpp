@@ -146,6 +146,15 @@ void configCb(colorize_pointcloud::ColorizerConfig &newconfig, uint32_t level) {
 }
 
 
+int32_t extractImgColor(cv::Point2d uv, cv::Mat img) {
+  uint8_t r = (uint8_t)img.at<cv::Vec3b>(uv)[0];;
+  uint8_t g = (uint8_t)img.at<cv::Vec3b>(uv)[1];;
+  uint8_t b = (uint8_t)img.at<cv::Vec3b>(uv)[2];;
+  int32_t rgb = (r << 16) | (g << 8) | b; 
+
+  return rgb;
+}
+
 void colorPointCloud(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud_therm, image_geometry::PinholeCameraModel cam_model_vis_, cv::Mat img_vis, image_geometry::PinholeCameraModel cam_model_therm_, cv::Mat img_therm, pcl::PointIndices fov_indices) {
   // for VIS
   cv::Point2d uv;
@@ -163,11 +172,8 @@ void colorPointCloud(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl::PointC
 	  pcl_cloud->points[i].b = img_vis.at<uchar>(cv::Point(uv.x,uv.y));
 	}
 	if (img_vis.channels() == 3) {
-	  uint8_t r = (uint8_t)img_vis.at<cv::Vec3b>(uv)[0];;
-	  uint8_t g = (uint8_t)img_vis.at<cv::Vec3b>(uv)[1];;
-	  uint8_t b = (uint8_t)img_vis.at<cv::Vec3b>(uv)[2];;
-	  int32_t rgb = (r << 16) | (g << 8) | b; 
-	  pcl_cloud->points[i].rgb = *(float *)(&rgb);
+	  int32_t rgb = extractImgColor(uv, img_vis);
+	  pcl_cloud->points[i].rgb_vis = *(float *)(&rgb);
 	}
 	fov_indices.indices.push_back(i);
       }
@@ -193,11 +199,8 @@ void colorPointCloud(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl::PointC
   	  pcl_cloud->points[i].b_therm = img_therm.at<uchar>(cv::Point(uv.x,uv.y));
   	}
   	if (img_vis.channels() == 3) {
-  	  uint8_t r = (uint8_t)img_therm.at<cv::Vec3b>(uv)[0];;
-  	  uint8_t g = (uint8_t)img_therm.at<cv::Vec3b>(uv)[1];;
-  	  uint8_t b = (uint8_t)img_therm.at<cv::Vec3b>(uv)[2];;
-  	  int32_t rgb = (r << 16) | (g << 8) | b; 
-  	  pcl_cloud->points[i].rgb = *(float *)(&rgb);
+	  int32_t rgb = extractImgColor(uv, img_therm);
+	  pcl_cloud->points[i].rgb = *(float *)(&rgb);
   	}
   	fov_indices.indices.push_back(i);
       }
