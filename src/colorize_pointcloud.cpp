@@ -1,37 +1,3 @@
-/*********************************************************************
- * Software License Agreement (BSD License)
- *
- *  Copyright (c) 2012, Ye Cheng
- *  All rights reserved.
- *
- *  Redistribution and use in source and binary forms, with or without
- *  modification, are permitted provided that the following conditions
- *  are met:
- *
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above
- *     copyright notice, this list of conditions and the following
- *     disclaimer in the documentation and/or other materials provided
- *     with the distribution.
- *   * Neither the name of the Willow Garage nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- *  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- *  COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- *  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- *  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- *  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- *********************************************************************/
-
 #include <ros/ros.h>
 #include <cv_bridge/cv_bridge.h>
 #include <dynamic_reconfigure/server.h>
@@ -185,6 +151,7 @@ void colorPointCloud(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl::PointC
     
     // is point in front of camera?
     if(pcl_cloud->points[i].z>0) {
+
       uv = cam_model_vis_.project3dToPixel(
 					   cv::Point3d(pcl_cloud->points.at(i).x, pcl_cloud->points.at(i).y, pcl_cloud->points.at(i).z));
       //is pixel in bounds of image?
@@ -201,12 +168,14 @@ void colorPointCloud(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl::PointC
       }
       //point is not in FOV of the camera
       else{
-	pcl_cloud->points[i].rgb_vis = *(float *)(&color_rgb);
+	pcl_cloud->points[i].rgb_vis = 0;
+	// pcl_cloud->points[i].rgb_vis = *(float *)(&color_rgb);
       }
     }
     //point is behind camera
     else{
-      pcl_cloud->points[i].rgb_vis = *(float *)(&color_rgb);
+      pcl_cloud->points[i].rgb_vis = 0;      
+      // pcl_cloud->points[i].rgb_vis = *(float *)(&color_rgb);
     }
   
     // for THERM
@@ -217,26 +186,68 @@ void colorPointCloud(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl::PointC
       if (uv.x >= 0 && uv.x < img_therm.cols && uv.y >= 0 && uv.y < img_therm.rows){
   	if (img_therm.channels() == 1) {
 	  int32_t rgb = extractImgInten(uv, img_therm);
-	  pcl_cloud->points[i].rgb = *(float *)(&rgb);
+	  pcl_cloud->points[i].rgb_therm = *(float *)(&rgb);
   	}
   	if (img_vis.channels() == 3) {
 	  int32_t rgb = extractImgColor(uv, img_therm);
-	  pcl_cloud->points[i].rgb = *(float *)(&rgb);
+	  pcl_cloud->points[i].rgb_therm = *(float *)(&rgb);
   	}
   	fov_indices.indices.push_back(i);
       }
       //point is not in FOV of the camera
       else{
-  	pcl_cloud->points[i].rgb = *(float *)(&color_rgb);
+  	pcl_cloud->points[i].rgb_therm = 0;
+  	// pcl_cloud->points[i].rgb_therm = *(float *)(&color_rgb);
       }
     }
     //point is behind camera
     else{
-      pcl_cloud->points[i].rgb = *(float *)(&color_rgb);
+      pcl_cloud->points[i].rgb_therm = 0;
+      // pcl_cloud->points[i].rgb_therm = *(float *)(&color_rgb);
     }
 
-    // TODO: fusion here
+    // cout << "red: " << unsigned(r) << endl;
+    // cout << "green: " << unsigned(g) << endl;
+    // cout << "blue: " << unsigned(b) << endl;
+
     
+    // TODO: overlay here
+    // rgb values of modality of interest for fusion (with _val tag to prevent name collisions)
+    uint32_t rgb_therm_val = *reinterpret_cast<int*>(&pcl_cloud->points[i].rgb_therm);
+    uint8_t r_therm_val = (rgb_therm_val >> 16) & 0x0000ff;
+    uint8_t g_therm_val = (rgb_therm_val >> 8)  & 0x0000ff;
+    uint8_t b_therm_val = (rgb_therm_val)       & 0x0000ff;
+    uint32_t rgb_vis_val = *reinterpret_cast<int*>(&pcl_cloud->points[i].rgb_vis);
+    uint8_t r_vis_val = (rgb_vis_val >> 16) & 0x0000ff;
+    uint8_t g_vis_val = (rgb_vis_val >> 8)  & 0x0000ff;
+    uint8_t b_vis_val = (rgb_vis_val)       & 0x0000ff;
+    
+    uint8_t inten_therm = 0.299 * r_therm_val +  0.587 * g_therm_val + 0.114 * b_therm_val;
+    uint8_t inten_vis = 0.299 * r_vis_val +  0.587 * g_vis_val + 0.114 * b_vis_val;
+    // cout << "thermal intensity: " << unsigned(inten_therm) << endl;
+    
+    uint8_t threshold = 100;
+    double alpha = 0.5;
+
+    if (inten_therm > threshold) {
+      uint8_t r_fus = (uint8_t)(alpha * r_therm_val + (1 - alpha) * r_vis_val);
+      uint8_t g_fus = (uint8_t)(alpha * g_therm_val + (1 - alpha) * g_vis_val);
+      uint8_t b_fus = (uint8_t)(alpha * b_therm_val + (1 - alpha) * b_vis_val);
+      int32_t rgb_fus = (r_fus << 16) | (g_fus << 8) | b_fus;
+
+      // uint8_t r_fus = r_therm_val;
+      // uint8_t g_fus = g_therm_val;
+      // uint8_t b_fus = b_therm_val;
+      // int32_t rgb_fus = (r_fus << 16) | (g_fus << 8) | b_fus;
+
+      pcl_cloud->points[i].rgb = *(float *)(&rgb_fus);
+    }
+    else {
+      // default is grayscale visual image
+      int32_t rgb = (inten_vis << 16) | (inten_vis << 8) | inten_vis; 
+      pcl_cloud->points[i].rgb = *(float *)(&rgb);
+    } 
+      
   }
 }
 
