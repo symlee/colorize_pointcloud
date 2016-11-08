@@ -112,6 +112,22 @@ struct multModalCloud
     float rgb_rad;				
   };
 
+  // union 
+  // { 
+  //   union 
+  //   { 
+  //     struct 
+  //     { 
+  // 	uint8_t b; 
+  // 	uint8_t g; 
+  // 	uint8_t r; 
+  // 	uint8_t a; 
+  //     }; 
+  //     float rgb; 
+  //   }; 
+  //   uint32_t rgba; 
+  // };
+
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW   // make sure our new allocators are aligned
 } EIGEN_ALIGN16;                    // enforce SSE padding for correct memory alignment
 
@@ -145,6 +161,13 @@ void configCb(colorize_pointcloud::ColorizerConfig &newconfig, uint32_t level) {
     color_rgb = (((uint8_t)color_r) << 16) | (((uint8_t)color_g) << 8) | ((uint8_t)color_b); 
 }
 
+int32_t extractImgInten(cv::Point2d uv, cv::Mat img) {
+  uint8_t inten = (uint8_t)img.at<uchar>(cv::Point(uv.x,uv.y));
+  int32_t rgb = (inten << 16) | (inten << 8) | inten; 
+
+  return rgb;
+}
+
 
 int32_t extractImgColor(cv::Point2d uv, cv::Mat img) {
   uint8_t r = (uint8_t)img.at<cv::Vec3b>(uv)[0];;
@@ -167,9 +190,8 @@ void colorPointCloud(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl::PointC
       //is pixel in bounds of image?
       if (uv.x >= 0 && uv.x < img_vis.cols && uv.y >= 0 && uv.y < img_vis.rows){
 	if (img_vis.channels() == 1) {
-	  pcl_cloud->points[i].r = img_vis.at<uchar>(cv::Point(uv.x,uv.y));
-	  pcl_cloud->points[i].g = img_vis.at<uchar>(cv::Point(uv.x,uv.y));
-	  pcl_cloud->points[i].b = img_vis.at<uchar>(cv::Point(uv.x,uv.y));
+	  int32_t rgb = extractImgInten(uv, img_vis);
+	  pcl_cloud->points[i].rgb_vis = *(float *)(&rgb);
 	}
 	if (img_vis.channels() == 3) {
 	  int32_t rgb = extractImgColor(uv, img_vis);
@@ -184,7 +206,7 @@ void colorPointCloud(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl::PointC
     }
     //point is behind camera
     else{
-       pcl_cloud->points[i].rgb_vis = *(float *)(&color_rgb);
+      pcl_cloud->points[i].rgb_vis = *(float *)(&color_rgb);
     }
   
     // for THERM
@@ -194,9 +216,8 @@ void colorPointCloud(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl::PointC
       //is pixel in bounds of image?
       if (uv.x >= 0 && uv.x < img_therm.cols && uv.y >= 0 && uv.y < img_therm.rows){
   	if (img_therm.channels() == 1) {
-  	  pcl_cloud->points[i].r_therm = img_therm.at<uchar>(cv::Point(uv.x,uv.y));
-  	  pcl_cloud->points[i].g_therm = img_therm.at<uchar>(cv::Point(uv.x,uv.y));
-  	  pcl_cloud->points[i].b_therm = img_therm.at<uchar>(cv::Point(uv.x,uv.y));
+	  int32_t rgb = extractImgInten(uv, img_therm);
+	  pcl_cloud->points[i].rgb = *(float *)(&rgb);
   	}
   	if (img_vis.channels() == 3) {
 	  int32_t rgb = extractImgColor(uv, img_therm);
@@ -213,6 +234,9 @@ void colorPointCloud(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl::PointC
     else{
       pcl_cloud->points[i].rgb = *(float *)(&color_rgb);
     }
+
+    // TODO: fusion here
+    
   }
 }
 
@@ -277,8 +301,8 @@ void callback(const sensor_msgs::ImageConstPtr &imgMsg_vis, const sensor_msgs::C
 
 
   colorPointCloud(pcl_cloud, pcl_cloud_therm, cam_model_vis_, img_vis, cam_model_therm_, img_therm, fov_indices);
-  
-    
+
+
   // transform colored PCL cloud to sensor_msgs cloud
   sensor_msgs::PointCloud2 color_cld;
   
