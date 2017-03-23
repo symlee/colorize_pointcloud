@@ -14,6 +14,16 @@
 #include <image_geometry/pinhole_camera_model.h>
 #include <colorize_pointcloud/ColorizerConfig.h>
 
+#include <pcl/point_types.h>
+#include <pcl/impl/instantiate.hpp>
+#include <pcl/filters/impl/extract_indices.hpp>
+//#include "colorize_pointcloud.h"
+
+// pcl instantiation for custom point type
+// PCL_INSTANTIATE(ExtractIndices, multModalCloud);
+//template class extract_indices<pcl::PointCloud<multModalCloud> >;
+
+
 using namespace std;
 
 std::string image_topic_vis;
@@ -78,21 +88,6 @@ struct multModalCloud
     float rgb_rad;				
   };
 
-  // union 
-  // { 
-  //   union 
-  //   { 
-  //     struct 
-  //     { 
-  // 	uint8_t b; 
-  // 	uint8_t g; 
-  // 	uint8_t r; 
-  // 	uint8_t a; 
-  //     }; 
-  //     float rgb; 
-  //   }; 
-  //   uint32_t rgba; 
-  // };
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW   // make sure our new allocators are aligned
 } EIGEN_ALIGN16;                    // enforce SSE padding for correct memory alignment
@@ -148,7 +143,10 @@ void colorPointCloud(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl::PointC
   // for VIS
   cv::Point2d uv;
   for(unsigned long i=0; i < pcl_cloud->size(); ++i){
-    
+
+    bool in_vis_FOV = false;
+    bool in_therm_FOV = false;    
+			  
     // is point in front of camera?
     if(pcl_cloud->points[i].z>0) {
 
@@ -165,6 +163,7 @@ void colorPointCloud(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl::PointC
 	  pcl_cloud->points[i].rgb_vis = *(float *)(&rgb);
 	}
 	fov_indices.indices.push_back(i);
+	in_vis_FOV = true;
       }
       //point is not in FOV of the camera
       else{
@@ -193,6 +192,7 @@ void colorPointCloud(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl::PointC
 	  pcl_cloud->points[i].rgb_therm = *(float *)(&rgb);
   	}
   	fov_indices.indices.push_back(i);
+	in_therm_FOV = true;
       }
       //point is not in FOV of the camera
       else{
@@ -206,11 +206,7 @@ void colorPointCloud(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl::PointC
       // pcl_cloud->points[i].rgb_therm = *(float *)(&color_rgb);
     }
 
-    // cout << "red: " << unsigned(r) << endl;
-    // cout << "green: " << unsigned(g) << endl;
-    // cout << "blue: " << unsigned(b) << endl;
-
-    
+   
     // TODO: overlay here
     // rgb values of modality of interest for fusion (with _val tag to prevent name collisions)
     uint32_t rgb_therm_val = *reinterpret_cast<int*>(&pcl_cloud->points[i].rgb_therm);
@@ -221,19 +217,25 @@ void colorPointCloud(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl::PointC
     uint8_t r_vis_val = (rgb_vis_val >> 16) & 0x0000ff;
     uint8_t g_vis_val = (rgb_vis_val >> 8)  & 0x0000ff;
     uint8_t b_vis_val = (rgb_vis_val)       & 0x0000ff;
+
+    // verified values non zero
+    uint8_t inten_therm = (uint8_t)(0.299 * r_therm_val +  0.587 * g_therm_val + 0.114 * b_therm_val);
+    uint8_t inten_vis = (uint8_t)(0.299 * r_vis_val +  0.587 * g_vis_val + 0.114 * b_vis_val);
     
-    uint8_t inten_therm = 0.299 * r_therm_val +  0.587 * g_therm_val + 0.114 * b_therm_val;
-    uint8_t inten_vis = 0.299 * r_vis_val +  0.587 * g_vis_val + 0.114 * b_vis_val;
-    // cout << "thermal intensity: " << unsigned(inten_therm) << endl;
-    
-    uint8_t threshold = 100;
-    double alpha = 0.5;
+    uint8_t threshold = 0;
+    double alpha = 1;
 
     if (inten_therm > threshold) {
+  
       uint8_t r_fus = (uint8_t)(alpha * r_therm_val + (1 - alpha) * r_vis_val);
       uint8_t g_fus = (uint8_t)(alpha * g_therm_val + (1 - alpha) * g_vis_val);
       uint8_t b_fus = (uint8_t)(alpha * b_therm_val + (1 - alpha) * b_vis_val);
       int32_t rgb_fus = (r_fus << 16) | (g_fus << 8) | b_fus;
+
+      // cout << "alpha: " << alpha << endl;
+      // cout << "r_therm_val: " << unsigned(r_therm_val) << endl;      
+      // cout << "r_vis_val: " << unsigned(r_vis_val) << endl;      
+      // cout << "r_fus: " << unsigned(r_fus) << endl;
 
       // uint8_t r_fus = r_therm_val;
       // uint8_t g_fus = g_therm_val;
@@ -246,7 +248,18 @@ void colorPointCloud(pcl::PointCloud<multModalCloud>::Ptr pcl_cloud, pcl::PointC
       // default is grayscale visual image
       int32_t rgb = (inten_vis << 16) | (inten_vis << 8) | inten_vis; 
       pcl_cloud->points[i].rgb = *(float *)(&rgb);
-    } 
+    }
+
+    // TODO - only make this happen if keep insiders is checked
+    // throw away points that are not in field of view of any camera
+    if (in_vis_FOV == false && in_therm_FOV == false) {
+      //pcl_cloud.erase(i);
+
+      // iterator it = points.erase (position); 
+      // width = static_cast<uint32_t> (points.size ());
+      // height = 1;
+      // return (it)      
+    }
       
   }
 }
@@ -321,13 +334,14 @@ void callback(const sensor_msgs::ImageConstPtr &imgMsg_vis, const sensor_msgs::C
   // http://www.pcl-users.org/custom-point-types-td2611598.html
   if(!keep_outsiders) {
     // //        ROS_INFO("Only Displaying Points in View");
-    // //    pcl::ExtractIndices<pcl::PointCloud<multModalCloud> > extractFOVPoints2;
+    // pcl::ExtractIndices<pcl::PointCloud<multModalCloud> > extractFOVPoints2;
     // pcl::ExtractIndices<pcl::PointXYZRGB> extractFOVPoints;
     // extractFOVPoints.setIndices(boost::make_shared<const pcl::PointIndices>(fov_indices));
     // extractFOVPoints.setInputCloud(pcl_cloud);
     // pcl::PointCloud<pcl::PointXYZRGB>::Ptr output(new pcl::PointCloud<pcl::PointXYZRGB>);
     // extractFOVPoints.filter(*output);
     // pcl::toROSMsg(*output, color_cld);
+    
   }
   else
     pcl::toROSMsg(*pcl_cloud, color_cld);
